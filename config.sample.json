@@ -1,0 +1,24 @@
+{
+  "slack": {
+    "webhookUrl": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+    "channel": "#expo-alerts",
+    "username": "Expo Monitor Bot",
+    "iconEmoji": ":robot_face:"
+  },
+  "monitoring": {
+    "interval": 2,
+    "pavilions": [
+      "H1H9",
+      "I900",
+      "HQH0",
+      "HGH0",
+      "C9J0"
+    ],
+    "notifyOnStatus": [0, 1]
+  },
+  "api": {
+    "dataUrl": "https://expo.ebii.net/api/data",
+    "timeout": 10000
+  },
+  "debug": false
+}
