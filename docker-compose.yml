@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  expo-monitor:
+    build: .
+    container_name: expo-monitor-today
+    restart: unless-stopped
+    volumes:
+      # 設定ファイルをマウント
+      - ./config.json:/app/config.json:ro
+      # ログ出力用（オプション）
+      - ./logs:/app/logs
+    environment:
+      # Node.js環境変数
+      - NODE_ENV=production
+      # タイムゾーン設定
+      - TZ=Asia/Tokyo
+    # ログ設定
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # メモリ制限（オプション）
+    mem_limit: 256m
+    # CPU制限（オプション）
+    cpus: '0.5'
+    
+  # 開発用サービス（デバッグモード）
+  expo-monitor-dev:
+    build: .
+    container_name: expo-monitor-dev
+    restart: "no"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=development
+      - TZ=Asia/Tokyo
+    command: ["node", "index.js", "--debug"]
+    profiles:
+      - dev
