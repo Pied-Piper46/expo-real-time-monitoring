@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   app:
-    image: yujik/expo-real-time-monitoring:1.0
+    image: yujik/expo-real-time-monitoring:latest
     container_name: expo-real-time-monitoring
     environment:
       - TZ=Asia/Tokyo

@@ -15,7 +15,7 @@ echo ""
 if [ ! -f "config.json" ]; then
     echo "Error: config.json が見つかりません"
     echo "次のコマンドで作成してください:"
-    echo "cp config.sample.json config.json"
+    echo "touch config.json"
     echo "その後、config.json を編集してSlack Webhook URLを設定してください"
     exit 1
 fi

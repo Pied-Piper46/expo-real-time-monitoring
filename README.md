@@ -92,10 +92,10 @@ node index.js --debug
 ```bash
 # 設定ファイル
 # config.json を編集してSlack Webhook URLと監視パビリオンを設定
-cp config.sample.json config.json
+touch config.json # もしくはscp
+vi config.json
 
 # docker-composeファイル
-# もしくはscpなど
 touch docker-compose.prod.yml # 本番環境
 touch docker-compose.yml
 ```
@@ -106,8 +106,6 @@ touch docker-compose.yml
 
 ###### 推奨: デプロイスクリプト使用
 ```bash
-# 本番サーバー上のプロジェクトディレクトリで実行
-cd /path/to/expo-real-time-monitoring  # 本番環境のプロジェクトパス
 ./deploy.sh  # 自動デプロイ（最新イメージプル + 起動確認含む）
 ```
 
