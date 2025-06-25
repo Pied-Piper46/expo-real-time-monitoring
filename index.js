@@ -120,6 +120,32 @@ class ExpoMonitor {
         }
     }
 
+    isBusinessHours() {
+        const now = new Date();
+        const hour = now.getHours();
+        return hour >= 9 && hour < 21;
+    }
+
+    getMonitoringInterval() {
+        const now = new Date();
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+        
+        if (hour >= 9 && hour < 21) {
+            // 営業時間内: 通常間隔
+            return this.config.monitoring.interval * 1000;
+        } else if (hour === 8 && minute >= 45) {
+            // 8:45-8:59: 営業開始直前の高頻度監視
+            return 30 * 1000;
+        } else if (hour >= 8 && hour < 9) {
+            // 8:00-8:44: 準備時間帯
+            return 5 * 60 * 1000;
+        } else {
+            // 深夜・早朝: 低頻度監視
+            return 30 * 60 * 1000;
+        }
+    }
+
     getPavilionDisplayName(pavilionCode, apiName) {
         if (PAVILION_NAMES[pavilionCode]) {
             const [shortName, category] = PAVILION_NAMES[pavilionCode];
@@ -257,13 +283,28 @@ class ExpoMonitor {
     async monitorOnce() {
         try {
             const pavilions = await this.fetchExpoData();
+            
+            // 空データの場合のログ出力
+            if (!pavilions || pavilions.length === 0) {
+                const businessHours = this.isBusinessHours();
+                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
+                if (businessHours) {
+                    console.log(`${timeStr}: 営業時間内ですが空データを受信しました`);
+                } else if (this.debug) {
+                    console.log(`${timeStr}: 営業時間外 - 空データを受信`);
+                }
+                return;
+            }
+            
             const availableSlots = this.checkAvailability(pavilions);
 
             if (availableSlots.length > 0) {
-                console.log(`${new Date().toISOString()}: ${availableSlots.length}件の空きを検出`);
+                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
+                console.log(`${timeStr}: ${availableSlots.length}件の空きを検出`);
                 await this.processAvailableSlots(availableSlots);
             } else if (this.debug) {
-                console.log(`${new Date().toISOString()}: 空きなし`);
+                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
+                console.log(`${timeStr}: 空きなし`);
             }
 
         } catch (error) {
@@ -273,21 +314,36 @@ class ExpoMonitor {
 
     async start() {
         console.log('Expo Monitor 開始');
-        console.log(`監視間隔: ${this.config.monitoring.interval}秒`);
+        console.log(`基本監視間隔: ${this.config.monitoring.interval}秒 (営業時間内)`);
         console.log(`監視対象: ${this.config.monitoring.pavilions.join(', ')}`);
+        console.log('時間帯別監視間隔: 深夜30分 → 朝8時以降5分 → 8:45以降30秒 → 営業時間内2秒');
         
         this.isRunning = true;
 
         // 最初に一度実行
         await this.monitorOnce();
 
-        // 定期実行開始
-        const intervalMs = this.config.monitoring.interval * 1000;
-        this.intervalId = setInterval(async () => {
-            if (this.isRunning) {
-                await this.monitorOnce();
+        // 動的間隔での定期実行
+        const scheduleNext = () => {
+            if (!this.isRunning) return;
+            
+            const currentInterval = this.getMonitoringInterval();
+            const now = new Date();
+            const timeStr = now.toTimeString().slice(0, 8);
+            
+            if (this.debug) {
+                console.log(`${timeStr}: 次回実行まで ${currentInterval/1000}秒`);
             }
-        }, intervalMs);
+            
+            this.timeoutId = setTimeout(async () => {
+                if (this.isRunning) {
+                    await this.monitorOnce();
+                    scheduleNext();
+                }
+            }, currentInterval);
+        };
+
+        scheduleNext();
 
         // 終了処理の設定
         process.on('SIGINT', () => {
@@ -304,6 +360,9 @@ class ExpoMonitor {
         this.isRunning = false;
         if (this.intervalId) {
             clearInterval(this.intervalId);
+        }
+        if (this.timeoutId) {
+            clearTimeout(this.timeoutId);
         }
         process.exit(0);
     }
