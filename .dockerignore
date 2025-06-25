@@ -9,10 +9,7 @@ yarn-error.log*
 .gitignore
 
 # Documentation
-README.md
-SPECIFICATION.md
-PAVILION_LIST.md
-API_SPECIFICATION.md
+docs/
 
 # Configuration (mounted separately)
 config.json

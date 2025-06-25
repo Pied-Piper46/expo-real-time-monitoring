@@ -1,91 +1,10 @@
 version: '3.8'
 
 services:
-  expo-monitor:
-    image: yujik/expo-monitor-today:1.0
-    # 開発時やアーキテクチャ問題がある場合はローカルビルドを使用
-    # build: .
-    container_name: expo-monitor-prod
-    restart: unless-stopped
-    volumes:
-      # ログ出力用
-      - ./logs:/app/logs
+  app:
+    image: yujik/expo-real-time-monitoring:1.0
+    container_name: expo-real-time-monitoring
     environment:
-      # Node.js環境変数
-      - NODE_ENV=production
-      # タイムゾーン設定
       - TZ=Asia/Tokyo
-    # ログローテーション設定（本番環境向け）
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
-        compress: "true"
-    # リソース制限（本番環境向け）
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '1.0'
-        reservations:
-          memory: 128m
-          cpus: '0.25'
-    # ヘルスチェック
-    healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    # セキュリティ設定
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp:noexec,nosuid,size=100m
-    # ネットワーク設定（必要に応じて）
-    networks:
-      - expo-monitor-network
-
-  # 監視・メトリクス収集用（オプション）
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: watchtower-expo
-    restart: unless-stopped
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=3600
-      - WATCHTOWER_INCLUDE_STOPPED=true
-      - WATCHTOWER_REVIVE_STOPPED=false
-    command: expo-monitor-prod
-    profiles:
-      - watchtower
-
-networks:
-  expo-monitor-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/24
-
-# 本番環境用設定例
-# 以下はコメントアウト状態 - 必要に応じて有効化
-#
-# volumes:
-#   # ログの永続化（ホストマシン再起動後も保持）
-#   expo-logs:
-#     driver: local
-#     driver_opts:
-#       type: bind
-#       device: /var/log/expo-monitor
-#       o: bind
-#
-# secrets:
-#   # Docker Secretsを使用した設定管理
-#   slack_webhook:
-#     external: true
-#   expo_config:
-#     external: true
+      - ./config.json:/app/config.json
