@@ -1,9 +1,6 @@
 {
   "slack": {
-    "webhookUrl": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
-    "channel": "#expo-alerts",
-    "username": "Expo Monitor Bot",
-    "iconEmoji": ":robot_face:"
+    "webhookUrl": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
   },
   "monitoring": {
     "interval": 2,
