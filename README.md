@@ -1,4 +1,4 @@
-# Expo Monitor Today
+# Expo Real Time Monitoring
 
 2025年大阪万博のパビリオン空き状況を監視し、空きが出た際にSlackに通知するシステムです。
 
