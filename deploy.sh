@@ -4,7 +4,7 @@
 
 set -e  # エラー時は即座に終了
 
-IMAGE_NAME="yujik/expo-real-time-monitoring:1.0"
+IMAGE_NAME="yujik/expo-real-time-monitoring:latest"
 COMPOSE_FILE="docker-compose.prod.yml"
 
 echo "=== Expo Monitor 本番環境デプロイメント ==="
