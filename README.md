@@ -50,7 +50,7 @@
 
 ### ローカル実行
 
-#### 1. プロジェクトのクローン
+#### 1. リポジトリのクローン
 
 ```bash
 git clone https://github.com/your-repo/expo-real-time-monitoring.git
@@ -88,19 +88,17 @@ node index.js --debug
 
 ### Docker実行
 
-#### 1. 必要なファイルの準備
+#### 1. リポジトリのクローン
 ```bash
-# 設定ファイル
-# config.json を編集してSlack Webhook URLと監視パビリオンを設定
-touch config.json # もしくはscp
-vi config.json
-
-# docker-composeファイル
-touch docker-compose.prod.yml # 本番環境
-touch docker-compose.yml
+git clone https://github.com/your-repo/expo-real-time-monitoring.git
 ```
 
-#### 2. Docker Composeで実行
+#### 2. 設定ファイルの編集
+```bash
+cp config.sample.json config.json
+```
+
+#### 3. Docker Composeで実行
 
 ##### 本番環境（事前ビルド済みイメージ使用）
 

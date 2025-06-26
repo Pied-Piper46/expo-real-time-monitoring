@@ -50,7 +50,7 @@ if docker-compose -f ${COMPOSE_FILE} ps | grep -q "Up"; then
     docker-compose -f ${COMPOSE_FILE} ps
     echo ""
     echo "ログ確認コマンド:"
-    echo "docker-compose -f ${COMPOSE_FILE} logs -f expo-monitor"
+    echo "docker-compose -f ${COMPOSE_FILE} logs -f app"
     echo ""
     echo "停止コマンド:"
     echo "docker-compose -f ${COMPOSE_FILE} down"
@@ -58,6 +58,6 @@ else
     echo "Error: コンテナの起動に失敗しました"
     echo ""
     echo "ログを確認してください:"
-    echo "docker-compose -f ${COMPOSE_FILE} logs expo-monitor"
+    echo "docker-compose -f ${COMPOSE_FILE} logs app"
     exit 1
 fi

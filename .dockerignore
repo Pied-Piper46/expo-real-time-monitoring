@@ -20,6 +20,7 @@ config.json
 # Logs
 logs/
 *.log
+availability_log.jsonl
 
 # OS files
 .DS_Store

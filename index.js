@@ -88,6 +88,7 @@ class ExpoMonitor {
         this.config = this.loadConfig(configPath);
         this.debug = this.config.debug || process.argv.includes('--debug');
         this.isRunning = false;
+        this.previousStates = new Map(); // パビリオン+スロットの前回状態を記録
         
         if (this.debug) {
             console.log('デバッグモードで実行中');
@@ -194,6 +195,27 @@ class ExpoMonitor {
         return `${baseUrl}?${params.toString()}`;
     }
 
+    logAvailability(pavilionCode, timeSlot, status) {
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            pavilion_code: pavilionCode,
+            time_slot: this.formatTime(timeSlot),
+            status: status
+        };
+
+        const logLine = JSON.stringify(logEntry) + '\n';
+        const logFile = this.config.logging?.file || './availability_log.jsonl';
+
+        try {
+            fs.appendFileSync(logFile, logLine);
+            if (this.debug) {
+                console.log(`ログ記録: ${pavilionCode} ${this.formatTime(timeSlot)} - ステータス${status}`);
+            }
+        } catch (error) {
+            console.error('ログ記録エラー:', error.message);
+        }
+    }
+
     async sendSlackNotification(pavilion, slot) {
         const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
         const statusText = this.getStatusText(slot.s);
@@ -256,6 +278,18 @@ class ExpoMonitor {
 
             // スロットをチェック
             for (const slot of pavilion.s || []) {
+                const stateKey = `${pavilion.c}_${slot.t}`;
+                const previousStatus = this.previousStates.get(stateKey);
+                
+                // 状態0（空きあり）になった場合のみログ記録
+                if (slot.s === 0 && previousStatus !== 0) {
+                    this.logAvailability(pavilion.c, slot.t, slot.s);
+                }
+                
+                // 前回状態を更新
+                this.previousStates.set(stateKey, slot.s);
+                
+                // 通知判定（既存ロジック）
                 if (this.config.monitoring.notifyOnStatus.includes(slot.s)) {
                     availableSlots.push({
                         pavilion: pavilion,

@@ -3,7 +3,7 @@
 # マルチプラットフォーム対応でイメージをビルド・プッシュするスクリプト
 
 IMAGE_NAME="yujik/expo-real-time-monitoring"
-VERSION="1.1"
+VERSION="1.2"
 PLATFORMS="linux/amd64,linux/arm64"
 
 echo "=== Docker buildx マルチプラットフォームビルド ==="
