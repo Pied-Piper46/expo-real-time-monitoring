@@ -8,4 +8,4 @@ services:
       - TZ=Asia/Tokyo
     volumes:
       - ./config.json:/app/config.json
-      - ./availability_log.jsonl:/app/availability_log.jsonl
+      - ./logs:/app/logs
