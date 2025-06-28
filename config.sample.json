@@ -1,6 +1,11 @@
 {
   "slack": {
-    "webhookUrl": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    "webhookUrl": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+    "enabled": true
+  },
+  "line": {
+    "channelAccessToken": "YOUR_LINE_CHANNEL_ACCESS_TOKEN",
+    "enabled": true
   },
   "monitoring": {
     "interval": 2,

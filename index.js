@@ -217,6 +217,10 @@ class ExpoMonitor {
     }
 
     async sendSlackNotification(pavilion, slot) {
+        if (!this.config.slack?.enabled || !this.config.slack?.webhookUrl) {
+            return;
+        }
+
         const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
         const statusText = this.getStatusText(slot.s);
         const timeText = this.formatTime(slot.t);
@@ -233,11 +237,6 @@ class ExpoMonitor {
                     {
                         title: '時間',
                         value: timeText,
-                        short: true
-                    },
-                    {
-                        title: 'パビリオンコード',
-                        value: pavilion.c,
                         short: true
                     },
                     {
@@ -258,6 +257,40 @@ class ExpoMonitor {
             }
         } catch (error) {
             console.error('Slack通知送信エラー:', error.message);
+            throw error;
+        }
+    }
+
+    async sendLineNotification(pavilion, slot) {
+        if (!this.config.line?.enabled || !this.config.line?.channelAccessToken) {
+            return;
+        }
+
+        const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
+        const statusText = this.getStatusText(slot.s);
+        const timeText = this.formatTime(slot.t);
+        // const reservationUrl = this.generateReservationUrl(pavilion.c);
+
+        const message = {
+            messages: [{
+                type: "text",
+                // text: `${statusText} - ${displayName}\n時間: ${timeText}\n予約URL: ${reservationUrl}`
+                text: `${statusText} - ${displayName}\n時間: ${timeText}`
+            }]
+        };
+
+        try {
+            await axios.post('https://api.line.me/v2/bot/message/broadcast', message, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.config.line.channelAccessToken}`
+                }
+            });
+            if (this.debug) {
+                console.log(`LINE通知送信: ${displayName} (${timeText}) - ${statusText}`);
+            }
+        } catch (error) {
+            console.error('LINE通知送信エラー:', error.message);
             throw error;
         }
     }
@@ -305,7 +338,10 @@ class ExpoMonitor {
     async processAvailableSlots(availableSlots) {
         for (const { pavilion, slot } of availableSlots) {
             try {
+                // Slack通知
                 await this.sendSlackNotification(pavilion, slot);
+                // LINE通知
+                await this.sendLineNotification(pavilion, slot);
                 // レート制限対策で少し待機
                 await new Promise(resolve => setTimeout(resolve, 100));
             } catch (error) {
