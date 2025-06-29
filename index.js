@@ -278,6 +278,28 @@ class ExpoMonitor {
         }
     }
 
+    isCurrentlyBusinessHours(businessHours) {
+        const now = new Date();
+        const currentTime = now.toLocaleString('en-US', {timeZone: businessHours.timezone});
+        const currentDate = new Date(currentTime);
+        
+        const [startHour, startMinute] = businessHours.start.split(':').map(Number);
+        const [endHour, endMinute] = businessHours.end.split(':').map(Number);
+        
+        const currentMinutes = currentDate.getHours() * 60 + currentDate.getMinutes();
+        const startMinutes = startHour * 60 + startMinute;
+        const endMinutes = endHour * 60 + endMinute;
+        
+        // 日をまたがない場合（例: 8:00-21:00）
+        if (startMinutes < endMinutes) {
+            return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+        }
+        // 日をまたぐ場合（例: 22:00-6:00）
+        else {
+            return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+        }
+    }
+
     detectStatusChanges(pavilions) {
         const pavilionMap = new Map();
         
@@ -356,8 +378,12 @@ class ExpoMonitor {
             const pavilionMap = this.detectStatusChanges(pavilions);
 
             if (pavilionMap.size > 0) {
+                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
+                const totalChanges = Array.from(pavilionMap.values()).reduce((sum, data) => sum + data.changedSlots.length, 0);
+                console.log(`${timeStr}: ${pavilionMap.size}パビリオンで${totalChanges}件の状態変化を検出`);
                 await this.sendNotifications(pavilionMap);
             } else if (this.debug) {
+                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
                 console.log(`${timeStr}: 状態変化なし`);
             }
 
@@ -397,28 +423,52 @@ class ExpoMonitor {
         console.log('Expo Monitor 開始');
         console.log(`監視間隔: ${this.config.monitoring.interval}秒`);
         console.log(`監視対象: ${this.config.monitoring.pavilions.join(', ')}`);
-        console.log('営業時間: 8:00-21:00 (日本時間)');
         
-        // 営業時間の設定 (日本時間)
-        cron.schedule('0 8 * * *', () => {
+        // 営業時間の設定（設定ファイルから動的生成）
+        const businessHours = this.config.monitoring.businessHours;
+        const [startHour, startMinute] = businessHours.start.split(':').map(Number);
+        const [endHour, endMinute] = businessHours.end.split(':').map(Number);
+        
+        const startCron = `${startMinute} ${startHour} * * *`;
+        const endCron = `${endMinute} ${endHour} * * *`;
+        
+        console.log(`営業時間: ${businessHours.start}-${businessHours.end} (${businessHours.timezone})`);
+        console.log(`cronパターン: 開始=${startCron}, 終了=${endCron}`);
+        
+        cron.schedule(startCron, () => {
+            console.log(`cron: ${businessHours.start} 営業時間開始スケジュール実行`);
             this.startMonitoring();
         }, {
-            timezone: "Asia/Tokyo"
+            timezone: businessHours.timezone
         });
 
-        cron.schedule('0 21 * * *', () => {
+        cron.schedule(endCron, () => {
+            console.log(`cron: ${businessHours.end} 営業時間終了スケジュール実行`);
             this.stopMonitoring();
         }, {
-            timezone: "Asia/Tokyo"
+            timezone: businessHours.timezone
         });
 
-        // 現在時刻が営業時間内なら即座に開始
+        // cron動作確認用（毎分実行）
+        if (this.debug) {
+            cron.schedule('* * * * *', () => {
+                const now = new Date();
+                const jstTime = now.toLocaleString('ja-JP', {timeZone: businessHours.timezone});
+                console.log(`cron動作確認: ${jstTime} (監視中: ${this.isRunning})`);
+            }, {
+                timezone: businessHours.timezone
+            });
+        }
+
+        // 起動時の営業時間チェック
         const now = new Date();
-        const jstHour = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Tokyo"})).getHours();
-        if (jstHour >= 8 && jstHour < 21) {
+        const currentTime = now.toLocaleString('ja-JP', {timeZone: businessHours.timezone});
+        
+        if (this.isCurrentlyBusinessHours(businessHours)) {
+            console.log(`現在時刻: ${currentTime} - 営業時間内のため監視を開始します`);
             this.startMonitoring();
         } else {
-            console.log('営業時間外です。8:00に自動開始します。');
+            console.log(`現在時刻: ${currentTime} - 営業時間外です。${businessHours.start}に自動開始します`);
         }
 
         // 終了処理の設定

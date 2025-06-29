@@ -16,7 +16,12 @@
       "HGH0",
       "C9J0"
     ],
-    "notifyOnStatus": [0, 1]
+    "notifyOnStatus": [0, 1],
+    "businessHours": {
+      "start": "8:00",
+      "end": "21:00",
+      "timezone": "Asia/Tokyo"
+    }
   },
   "api": {
     "dataUrl": "https://expo.ebii.net/api/data",
