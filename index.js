@@ -1,6 +1,6 @@
 const axios = require('axios');
 const fs = require('fs');
-const path = require('path');
+const cron = require('node-cron');
 
 // パビリオン名マッピング（SPECIFICATION.mdから抽出）
 const PAVILION_NAMES = {
@@ -88,6 +88,7 @@ class ExpoMonitor {
         this.config = this.loadConfig(configPath);
         this.debug = this.config.debug || process.argv.includes('--debug');
         this.isRunning = false;
+        this.intervalId = null;
         this.previousStates = new Map(); // パビリオン+スロットの前回状態を記録
         
         if (this.debug) {
@@ -118,32 +119,6 @@ class ExpoMonitor {
             return response.data;
         } catch (error) {
             throw new Error(`API取得エラー: ${error.message}`);
-        }
-    }
-
-    isBusinessHours() {
-        const now = new Date();
-        const hour = now.getHours();
-        return hour >= 9 && hour < 21;
-    }
-
-    getMonitoringInterval() {
-        const now = new Date();
-        const hour = now.getHours();
-        const minute = now.getMinutes();
-        
-        if (hour >= 9 && hour < 21) {
-            // 営業時間内: 通常間隔
-            return this.config.monitoring.interval * 1000;
-        } else if (hour === 8 && minute >= 45) {
-            // 8:45-8:59: 営業開始直前の高頻度監視
-            return 30 * 1000;
-        } else if (hour >= 8 && hour < 9) {
-            // 8:00-8:44: 準備時間帯
-            return 5 * 60 * 1000;
-        } else {
-            // 深夜・早朝: 低頻度監視
-            return 30 * 60 * 1000;
         }
     }
 
@@ -216,27 +191,34 @@ class ExpoMonitor {
         }
     }
 
-    async sendSlackNotification(pavilion, slot) {
+    async sendSlackAlert(pavilion, changedSlots) {
         if (!this.config.slack?.enabled || !this.config.slack?.webhookUrl) {
             return;
         }
 
         const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
-        const statusText = this.getStatusText(slot.s);
-        const timeText = this.formatTime(slot.t);
         const reservationUrl = this.generateReservationUrl(pavilion.c);
+        
+        // 複数時間を文字列に結合
+        const timeDetails = changedSlots.map(slot => 
+            `${this.formatTime(slot.time)}(${slot.statusText})`
+        ).join(', ');
+        
+        // 全体的な色を決定（空きありがあれば good、そうでなければ warning）
+        const hasAvailable = changedSlots.some(slot => slot.status === 0);
+        const color = hasAvailable ? 'good' : 'warning';
 
         const message = {
             channel: this.config.slack.channel,
             username: this.config.slack.username || 'Expo Monitor Bot',
             icon_emoji: this.config.slack.iconEmoji || ':robot_face:',
             attachments: [{
-                color: slot.s === 0 ? 'good' : 'warning',
-                title: `${statusText} - ${displayName}`,
+                color: color,
+                title: `空き状況変化 - ${displayName}`,
                 fields: [
                     {
                         title: '時間',
-                        value: timeText,
+                        value: timeDetails,
                         short: true
                     },
                     {
@@ -253,7 +235,7 @@ class ExpoMonitor {
         try {
             await axios.post(this.config.slack.webhookUrl, message);
             if (this.debug) {
-                console.log(`Slack通知送信: ${displayName} (${timeText}) - ${statusText}`);
+                console.log(`Slack通知送信: ${displayName} - ${timeDetails}`);
             }
         } catch (error) {
             console.error('Slack通知送信エラー:', error.message);
@@ -261,21 +243,22 @@ class ExpoMonitor {
         }
     }
 
-    async sendLineNotification(pavilion, slot) {
+    async sendLineAlert(pavilion, changedSlots) {
         if (!this.config.line?.enabled || !this.config.line?.channelAccessToken) {
             return;
         }
 
         const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
-        const statusText = this.getStatusText(slot.s);
-        const timeText = this.formatTime(slot.t);
-        // const reservationUrl = this.generateReservationUrl(pavilion.c);
+        
+        // 複数時間を文字列に結合
+        const timeDetails = changedSlots.map(slot => 
+            `${this.formatTime(slot.time)}(${slot.statusText})`
+        ).join(', ');
 
         const message = {
             messages: [{
                 type: "text",
-                // text: `${statusText} - ${displayName}\n時間: ${timeText}\n予約URL: ${reservationUrl}`
-                text: `${statusText} - ${displayName}\n時間: ${timeText}`
+                text: `空き状況変化 - ${displayName}\n時間: ${timeDetails}`
             }]
         };
 
@@ -287,7 +270,7 @@ class ExpoMonitor {
                 }
             });
             if (this.debug) {
-                console.log(`LINE通知送信: ${displayName} (${timeText}) - ${statusText}`);
+                console.log(`LINE通知送信: ${displayName} - ${timeDetails}`);
             }
         } catch (error) {
             console.error('LINE通知送信エラー:', error.message);
@@ -295,8 +278,8 @@ class ExpoMonitor {
         }
     }
 
-    checkAvailability(pavilions) {
-        const availableSlots = [];
+    detectStatusChanges(pavilions) {
+        const pavilionMap = new Map();
         
         for (const pavilion of pavilions) {
             // 監視対象パビリオンかチェック
@@ -308,6 +291,8 @@ class ExpoMonitor {
             if (!pavilion.n || pavilion.n === '') {
                 continue;
             }
+
+            const changedSlots = [];
 
             // スロットをチェック
             for (const slot of pavilion.s || []) {
@@ -322,59 +307,58 @@ class ExpoMonitor {
                 // 前回状態を更新
                 this.previousStates.set(stateKey, slot.s);
                 
-                // 通知判定（既存ロジック）
-                if (this.config.monitoring.notifyOnStatus.includes(slot.s)) {
-                    availableSlots.push({
-                        pavilion: pavilion,
-                        slot: slot
+                // 通知判定（状態変化があり、かつ通知対象ステータス）
+                if (previousStatus !== slot.s && this.config.monitoring.notifyOnStatus.includes(slot.s)) {
+                    changedSlots.push({
+                        time: slot.t,
+                        status: slot.s,
+                        statusText: this.getStatusText(slot.s)
                     });
                 }
             }
+
+            // 変化があったスロットがある場合のみMapに追加
+            if (changedSlots.length > 0) {
+                pavilionMap.set(pavilion.c, {
+                    pavilion: pavilion,
+                    changedSlots: changedSlots
+                });
+            }
         }
 
-        return availableSlots;
+        return pavilionMap;
     }
 
-    async processAvailableSlots(availableSlots) {
-        for (const { pavilion, slot } of availableSlots) {
+    async sendNotifications(pavilionMap) {
+        for (const [pavilionCode, pavilionData] of pavilionMap) {
             try {
                 // Slack通知
-                await this.sendSlackNotification(pavilion, slot);
+                await this.sendSlackAlert(pavilionData.pavilion, pavilionData.changedSlots);
                 // LINE通知
-                await this.sendLineNotification(pavilion, slot);
+                await this.sendLineAlert(pavilionData.pavilion, pavilionData.changedSlots);
                 // レート制限対策で少し待機
                 await new Promise(resolve => setTimeout(resolve, 100));
             } catch (error) {
-                console.error(`通知送信失敗 (${pavilion.c}):`, error.message);
+                console.error(`通知送信失敗 (${pavilionCode}):`, error.message);
             }
         }
     }
 
-    async monitorOnce() {
+    async monitorAndNotify() {
         try {
             const pavilions = await this.fetchExpoData();
             
-            // 空データの場合のログ出力
+            // 空データの場合は何もしない
             if (!pavilions || pavilions.length === 0) {
-                const businessHours = this.isBusinessHours();
-                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
-                if (businessHours) {
-                    console.log(`${timeStr}: 営業時間内ですが空データを受信しました`);
-                } else if (this.debug) {
-                    console.log(`${timeStr}: 営業時間外 - 空データを受信`);
-                }
                 return;
             }
             
-            const availableSlots = this.checkAvailability(pavilions);
+            const pavilionMap = this.detectStatusChanges(pavilions);
 
-            if (availableSlots.length > 0) {
-                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
-                console.log(`${timeStr}: ${availableSlots.length}件の空きを検出`);
-                await this.processAvailableSlots(availableSlots);
+            if (pavilionMap.size > 0) {
+                await this.sendNotifications(pavilionMap);
             } else if (this.debug) {
-                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
-                console.log(`${timeStr}: 空きなし`);
+                console.log(`${timeStr}: 状態変化なし`);
             }
 
         } catch (error) {
@@ -382,38 +366,60 @@ class ExpoMonitor {
         }
     }
 
+    startMonitoring() {
+        if (this.isRunning) return;
+        
+        console.log('営業時間開始 - 監視を開始します');
+        this.isRunning = true;
+        
+        // 即座に一度実行
+        this.monitorAndNotify();
+        
+        // 設定された間隔で定期実行
+        this.intervalId = setInterval(() => {
+            this.monitorAndNotify();
+        }, this.config.monitoring.interval * 1000);
+    }
+
+    stopMonitoring() {
+        if (!this.isRunning) return;
+        
+        console.log('営業時間終了 - 監視を停止します');
+        this.isRunning = false;
+        
+        if (this.intervalId) {
+            clearInterval(this.intervalId);
+            this.intervalId = null;
+        }
+    }
+
     async start() {
         console.log('Expo Monitor 開始');
-        console.log(`基本監視間隔: ${this.config.monitoring.interval}秒 (営業時間内)`);
+        console.log(`監視間隔: ${this.config.monitoring.interval}秒`);
         console.log(`監視対象: ${this.config.monitoring.pavilions.join(', ')}`);
-        console.log('時間帯別監視間隔: 深夜30分 → 朝8時以降5分 → 8:45以降30秒 → 営業時間内2秒');
+        console.log('営業時間: 8:00-21:00 (日本時間)');
         
-        this.isRunning = true;
+        // 営業時間の設定 (日本時間)
+        cron.schedule('0 8 * * *', () => {
+            this.startMonitoring();
+        }, {
+            timezone: "Asia/Tokyo"
+        });
 
-        // 最初に一度実行
-        await this.monitorOnce();
+        cron.schedule('0 21 * * *', () => {
+            this.stopMonitoring();
+        }, {
+            timezone: "Asia/Tokyo"
+        });
 
-        // 動的間隔での定期実行
-        const scheduleNext = () => {
-            if (!this.isRunning) return;
-            
-            const currentInterval = this.getMonitoringInterval();
-            const now = new Date();
-            const timeStr = now.toTimeString().slice(0, 8);
-            
-            if (this.debug) {
-                console.log(`${timeStr}: 次回実行まで ${currentInterval/1000}秒`);
-            }
-            
-            this.timeoutId = setTimeout(async () => {
-                if (this.isRunning) {
-                    await this.monitorOnce();
-                    scheduleNext();
-                }
-            }, currentInterval);
-        };
-
-        scheduleNext();
+        // 現在時刻が営業時間内なら即座に開始
+        const now = new Date();
+        const jstHour = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Tokyo"})).getHours();
+        if (jstHour >= 8 && jstHour < 21) {
+            this.startMonitoring();
+        } else {
+            console.log('営業時間外です。8:00に自動開始します。');
+        }
 
         // 終了処理の設定
         process.on('SIGINT', () => {
@@ -427,13 +433,7 @@ class ExpoMonitor {
 
     stop() {
         console.log('\nExpo Monitor 停止中...');
-        this.isRunning = false;
-        if (this.intervalId) {
-            clearInterval(this.intervalId);
-        }
-        if (this.timeoutId) {
-            clearTimeout(this.timeoutId);
-        }
+        this.stopMonitoring();
         process.exit(0);
     }
 }
