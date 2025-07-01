@@ -11,16 +11,16 @@ echo "=== Expo Monitor 本番環境デプロイメント ==="
 echo "イメージ: ${IMAGE_NAME}"
 echo ""
 
-# Step 1: 設定ファイルの確認
-if [ ! -f "config.json" ]; then
-    echo "Error: config.json が見つかりません"
+# Step 1: 環境変数ファイルの確認
+if [ ! -f ".env" ]; then
+    echo "Error: .env ファイルが見つかりません"
     echo "次のコマンドで作成してください:"
-    echo "touch config.json"
-    echo "その後、config.json を編集してSlack Webhook URLを設定してください"
+    echo "cp .env.sample .env"
+    echo "その後、.env を編集して通知サービスの設定を行ってください"
     exit 1
 fi
 
-echo "設定ファイル確認完了"
+echo "環境変数ファイル確認完了"
 
 # Step 2: 最新イメージをプル
 echo ""

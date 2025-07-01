@@ -6,6 +6,7 @@ services:
     container_name: expo-real-time-monitoring
     environment:
       - TZ=Asia/Tokyo
+    env_file:
+      - .env
     volumes:
-      - ./config.json:/app/config.json
       - ./logs:/app/logs

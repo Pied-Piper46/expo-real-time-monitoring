@@ -6,6 +6,8 @@ services:
     container_name: expo-real-time-monitoring
     environment:
       - TZ=Asia/Tokyo
+    env_file:
+      - .env
     volumes:
       - .:/app
     
@@ -15,6 +17,9 @@ services:
     container_name: expo-real-time-monitoring-dev
     environment:
       - TZ=Asia/Tokyo
+      - DEBUG=true
+    env_file:
+      - .env
     volumes:
       - .:/app
     command: ["node", "index.js", "--debug"]

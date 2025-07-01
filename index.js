@@ -1,6 +1,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const cron = require('node-cron');
+const { TwitterApi } = require('twitter-api-v2');
 
 // パビリオン名マッピング（SPECIFICATION.mdから抽出）
 const PAVILION_NAMES = {
@@ -84,8 +85,8 @@ const PAVILION_NAMES = {
 };
 
 class ExpoMonitor {
-    constructor(configPath = './config.json') {
-        this.config = this.loadConfig(configPath);
+    constructor() {
+        this.config = this.loadEnvironmentConfig();
         this.debug = this.config.debug || process.argv.includes('--debug');
         this.isRunning = false;
         this.intervalId = null;
@@ -97,16 +98,76 @@ class ExpoMonitor {
         }
     }
 
-    loadConfig(configPath) {
-        try {
-            const configData = fs.readFileSync(configPath, 'utf8');
-            return JSON.parse(configData);
-        } catch (error) {
-            console.error(`設定ファイルの読み込みに失敗しました: ${configPath}`);
-            console.error('config.sample.json を参考に config.json を作成してください');
+
+    loadEnvironmentConfig() {
+        // 必須環境変数のチェック
+        const requiredVars = [];
+        
+        // 通知が有効な場合の必須変数をチェック
+        if (process.env.SLACK_ENABLED === 'true' && !process.env.SLACK_WEBHOOK_URL) {
+            requiredVars.push('SLACK_WEBHOOK_URL');
+        }
+        if (process.env.LINE_ENABLED === 'true' && !process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+            requiredVars.push('LINE_CHANNEL_ACCESS_TOKEN');
+        }
+        if (process.env.X_ENABLED === 'true') {
+            if (!process.env.X_APP_KEY) requiredVars.push('X_APP_KEY');
+            if (!process.env.X_APP_SECRET) requiredVars.push('X_APP_SECRET');
+            if (!process.env.X_ACCESS_TOKEN) requiredVars.push('X_ACCESS_TOKEN');
+            if (!process.env.X_ACCESS_SECRET) requiredVars.push('X_ACCESS_SECRET');
+        }
+        
+        if (requiredVars.length > 0) {
+            console.error('必須環境変数が設定されていません:', requiredVars.join(', '));
+            console.error('.env ファイルを作成するか、環境変数を設定してください');
             process.exit(1);
         }
+
+        return {
+            slack: {
+                webhookUrl: process.env.SLACK_WEBHOOK_URL,
+                enabled: process.env.SLACK_ENABLED === 'true',
+                channel: process.env.SLACK_CHANNEL,
+                username: process.env.SLACK_USERNAME || 'Expo Monitor Bot',
+                iconEmoji: process.env.SLACK_ICON_EMOJI || ':robot_face:'
+            },
+            line: {
+                channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+                enabled: process.env.LINE_ENABLED === 'true'
+            },
+            x: {
+                enabled: process.env.X_ENABLED === 'true',
+                appKey: process.env.X_APP_KEY,
+                appSecret: process.env.X_APP_SECRET,
+                accessToken: process.env.X_ACCESS_TOKEN,
+                accessSecret: process.env.X_ACCESS_SECRET
+            },
+            monitoring: {
+                interval: parseInt(process.env.MONITORING_INTERVAL) || 2,
+                pavilions: process.env.MONITORING_PAVILIONS ? 
+                    process.env.MONITORING_PAVILIONS.split(',').map(p => p.trim()) : 
+                    ['H1H9', 'I900', 'HQH0', 'HGH0', 'C9J0'],
+                notifyOnStatus: process.env.MONITORING_NOTIFY_ON_STATUS ? 
+                    process.env.MONITORING_NOTIFY_ON_STATUS.split(',').map(s => parseInt(s.trim())) : 
+                    [0, 1],
+                businessHours: {
+                    start: process.env.MONITORING_START_TIME || '8:00',
+                    end: process.env.MONITORING_END_TIME || '21:00',
+                    timezone: process.env.MONITORING_TIMEZONE || 'Asia/Tokyo'
+                }
+            },
+            logging: {
+                enabled: process.env.LOGGING_ENABLED === 'true',
+                file: process.env.LOGGING_FILE || './availability_log.jsonl'
+            },
+            api: {
+                dataUrl: process.env.API_DATA_URL || 'https://expo.ebii.net/api/data',
+                timeout: parseInt(process.env.API_TIMEOUT) || 10000
+            },
+            debug: process.env.DEBUG === 'true'
+        };
     }
+
 
     async fetchExpoData() {
         try {
@@ -171,6 +232,11 @@ class ExpoMonitor {
     }
 
     logAvailability(pavilionCode, timeSlot, status) {
+        // ログ機能が無効の場合は何もしない
+        if (!this.config.logging?.enabled) {
+            return;
+        }
+
         const logEntry = {
             timestamp: new Date().toISOString(),
             pavilion_code: pavilionCode,
@@ -278,6 +344,43 @@ class ExpoMonitor {
         }
     }
 
+    async sendXAlert(pavilion, changedSlots) {
+        if (!this.config.x?.enabled || !this.config.x?.appKey) {
+            return;
+        }
+
+        try {
+            // Twitter API クライアントを初期化
+            const client = new TwitterApi({
+                appKey: this.config.x.appKey,
+                appSecret: this.config.x.appSecret,
+                accessToken: this.config.x.accessToken,
+                accessSecret: this.config.x.accessSecret,
+            });
+
+            const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
+            
+            // 複数時間を文字列に結合
+            const timeDetails = changedSlots.map(slot => 
+                `${this.formatTime(slot.time)}(${slot.statusText})`
+            ).join(', ');
+
+            // X(Twitter)投稿用テキスト（LINEと同じ内容）
+            const tweetText = `[通知Bot] 空き状況変化 - ${displayName}\n時間: ${timeDetails}`;
+
+            // ツイート投稿
+            const { data: createdTweet } = await client.v2.tweet(tweetText);
+            
+            if (this.debug) {
+                console.log(`X投稿完了: ${displayName} - ${timeDetails}`);
+                console.log(`ツイートID: ${createdTweet.id}`);
+            }
+        } catch (error) {
+            console.error('X投稿エラー:', error.message);
+            throw error;
+        }
+    }
+
     isCurrentlyBusinessHours(businessHours) {
         const now = new Date();
         const currentTime = now.toLocaleString('en-US', {timeZone: businessHours.timezone});
@@ -358,6 +461,8 @@ class ExpoMonitor {
                 await this.sendSlackAlert(pavilionData.pavilion, pavilionData.changedSlots);
                 // LINE通知
                 await this.sendLineAlert(pavilionData.pavilion, pavilionData.changedSlots);
+                // X(Twitter)通知
+                await this.sendXAlert(pavilionData.pavilion, pavilionData.changedSlots);
                 // レート制限対策で少し待機
                 await new Promise(resolve => setTimeout(resolve, 100));
             } catch (error) {
