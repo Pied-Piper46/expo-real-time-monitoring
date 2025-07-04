@@ -1,7 +1,8 @@
+require('dotenv').config();
 const axios = require('axios');
 const fs = require('fs');
 const cron = require('node-cron');
-const { TwitterApi } = require('twitter-api-v2');
+const { sendAllNotifications } = require('./notifier');
 
 // パビリオン名マッピング（SPECIFICATION.mdから抽出）
 const PAVILION_NAMES = {
@@ -116,6 +117,10 @@ class ExpoMonitor {
             if (!process.env.X_ACCESS_TOKEN) requiredVars.push('X_ACCESS_TOKEN');
             if (!process.env.X_ACCESS_SECRET) requiredVars.push('X_ACCESS_SECRET');
         }
+        if (process.env.DISCORD_ENABLED === 'true') {
+            if (!process.env.DISCORD_BOT_TOKEN) requiredVars.push('DISCORD_BOT_TOKEN');
+            if (!process.env.DISCORD_CHANNEL_ID) requiredVars.push('DISCORD_CHANNEL_ID');
+        }
         
         if (requiredVars.length > 0) {
             console.error('必須環境変数が設定されていません:', requiredVars.join(', '));
@@ -132,8 +137,8 @@ class ExpoMonitor {
                 iconEmoji: process.env.SLACK_ICON_EMOJI || ':robot_face:'
             },
             line: {
-                channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-                enabled: process.env.LINE_ENABLED === 'true'
+                enabled: process.env.LINE_ENABLED === 'true',
+                channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
             },
             x: {
                 enabled: process.env.X_ENABLED === 'true',
@@ -141,6 +146,11 @@ class ExpoMonitor {
                 appSecret: process.env.X_APP_SECRET,
                 accessToken: process.env.X_ACCESS_TOKEN,
                 accessSecret: process.env.X_ACCESS_SECRET
+            },
+            discord: {
+                enabled: process.env.DISCORD_ENABLED === 'true',
+                botToken: process.env.DISCORD_BOT_TOKEN,
+                channelId: process.env.DISCORD_CHANNEL_ID
             },
             monitoring: {
                 interval: parseInt(process.env.MONITORING_INTERVAL) || 2,
@@ -211,25 +221,6 @@ class ExpoMonitor {
         return timeStr;
     }
 
-    formatDateToYMD() {
-        const date = new Date();
-        const y = date.getFullYear();
-        const m = String(date.getMonth() + 1).padStart(2, '0');
-        const d = String(date.getDate()).padStart(2, '0');
-        return `${y}${m}${d}`;
-    }
-
-    generateReservationUrl(pavilionCode) {
-        // 実際の予約URLを生成（ticketIdsが必要だが、サンプルとして基本URLを返す）
-        const baseUrl = 'https://ticket.expo2025.or.jp/event_time/';
-        const params = new URLSearchParams({
-            event_id: pavilionCode,
-            screen_id: '108',
-            lottery: '5',
-            entrance_date: this.formatDateToYMD()
-        });
-        return `${baseUrl}?${params.toString()}`;
-    }
 
     logAvailability(pavilionCode, timeSlot, status) {
         // ログ機能が無効の場合は何もしない
@@ -254,130 +245,6 @@ class ExpoMonitor {
             }
         } catch (error) {
             console.error('ログ記録エラー:', error.message);
-        }
-    }
-
-    async sendSlackAlert(pavilion, changedSlots) {
-        if (!this.config.slack?.enabled || !this.config.slack?.webhookUrl) {
-            return;
-        }
-
-        const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
-        const reservationUrl = this.generateReservationUrl(pavilion.c);
-        
-        // 複数時間を文字列に結合
-        const timeDetails = changedSlots.map(slot => 
-            `${this.formatTime(slot.time)}(${slot.statusText})`
-        ).join(', ');
-        
-        // 全体的な色を決定（空きありがあれば good、そうでなければ warning）
-        const hasAvailable = changedSlots.some(slot => slot.status === 0);
-        const color = hasAvailable ? 'good' : 'warning';
-
-        const message = {
-            channel: this.config.slack.channel,
-            username: this.config.slack.username || 'Expo Monitor Bot',
-            icon_emoji: this.config.slack.iconEmoji || ':robot_face:',
-            attachments: [{
-                color: color,
-                title: `空き状況変化 - ${displayName}`,
-                fields: [
-                    {
-                        title: '時間',
-                        value: timeDetails,
-                        short: true
-                    },
-                    {
-                        title: '予約URL',
-                        value: `<${reservationUrl}|予約ページを開く>`,
-                        short: false
-                    }
-                ],
-                footer: 'Expo Monitor',
-                ts: Math.floor(Date.now() / 1000)
-            }]
-        };
-
-        try {
-            await axios.post(this.config.slack.webhookUrl, message);
-            if (this.debug) {
-                console.log(`Slack通知送信: ${displayName} - ${timeDetails}`);
-            }
-        } catch (error) {
-            console.error('Slack通知送信エラー:', error.message);
-            throw error;
-        }
-    }
-
-    async sendLineAlert(pavilion, changedSlots) {
-        if (!this.config.line?.enabled || !this.config.line?.channelAccessToken) {
-            return;
-        }
-
-        const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
-        
-        // 複数時間を文字列に結合
-        const timeDetails = changedSlots.map(slot => 
-            `${this.formatTime(slot.time)}(${slot.statusText})`
-        ).join(', ');
-
-        const message = {
-            messages: [{
-                type: "text",
-                text: `空き状況変化 - ${displayName}\n時間: ${timeDetails}`
-            }]
-        };
-
-        try {
-            await axios.post('https://api.line.me/v2/bot/message/broadcast', message, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.config.line.channelAccessToken}`
-                }
-            });
-            if (this.debug) {
-                console.log(`LINE通知送信: ${displayName} - ${timeDetails}`);
-            }
-        } catch (error) {
-            console.error('LINE通知送信エラー:', error.message);
-            throw error;
-        }
-    }
-
-    async sendXAlert(pavilion, changedSlots) {
-        if (!this.config.x?.enabled || !this.config.x?.appKey) {
-            return;
-        }
-
-        try {
-            // Twitter API クライアントを初期化
-            const client = new TwitterApi({
-                appKey: this.config.x.appKey,
-                appSecret: this.config.x.appSecret,
-                accessToken: this.config.x.accessToken,
-                accessSecret: this.config.x.accessSecret,
-            });
-
-            const displayName = this.getPavilionDisplayName(pavilion.c, pavilion.n);
-            
-            // 複数時間を文字列に結合
-            const timeDetails = changedSlots.map(slot => 
-                `${this.formatTime(slot.time)}(${slot.statusText})`
-            ).join(', ');
-
-            // X(Twitter)投稿用テキスト（LINEと同じ内容）
-            const tweetText = `[通知Bot] 空き状況変化 - ${displayName}\n時間: ${timeDetails}`;
-
-            // ツイート投稿
-            const { data: createdTweet } = await client.v2.tweet(tweetText);
-            
-            if (this.debug) {
-                console.log(`X投稿完了: ${displayName} - ${timeDetails}`);
-                console.log(`ツイートID: ${createdTweet.id}`);
-            }
-        } catch (error) {
-            console.error('X投稿エラー:', error.message);
-            throw error;
         }
     }
 
@@ -457,12 +324,25 @@ class ExpoMonitor {
     async sendNotifications(pavilionMap) {
         for (const [pavilionCode, pavilionData] of pavilionMap) {
             try {
-                // Slack通知
-                await this.sendSlackAlert(pavilionData.pavilion, pavilionData.changedSlots);
-                // LINE通知
-                await this.sendLineAlert(pavilionData.pavilion, pavilionData.changedSlots);
-                // X(Twitter)通知
-                await this.sendXAlert(pavilionData.pavilion, pavilionData.changedSlots);
+                const displayName = this.getPavilionDisplayName(pavilionData.pavilion.c, pavilionData.pavilion.n);
+                const timeDetails = pavilionData.changedSlots.map(slot => 
+                    `${this.formatTime(slot.time)}(${slot.statusText})`
+                ).join(', ');
+                
+                // 並列で全通知を送信
+                const result = await sendAllNotifications(
+                    this.config,
+                    displayName,
+                    timeDetails
+                );
+                
+                if (this.debug) {
+                    console.log(`通知結果 (${pavilionCode}): ${result.success}/${result.total}件成功`);
+                    if (result.failures.length > 0) {
+                        console.log('失敗した通知:', result.failures);
+                    }
+                }
+                
                 // レート制限対策で少し待機
                 await new Promise(resolve => setTimeout(resolve, 100));
             } catch (error) {
