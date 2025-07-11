@@ -73,7 +73,7 @@ async function sendXMessage(config, displayName, timeDetails) {
             accessSecret: config.accessSecret
         });
         
-        const tweetText = `空き状況変化 - ${displayName}\n時間: ${timeDetails}`;
+        const tweetText = `空き検知 - ${displayName}`;
         const { data: createdTweet } = await client.v2.tweet(tweetText);
         
         return { success: true, platform: 'X', tweetId: createdTweet.id };

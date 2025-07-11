@@ -92,10 +92,15 @@ class ExpoMonitor {
         this.isRunning = false;
         this.intervalId = null;
         this.previousStates = new Map(); // パビリオン+スロットの前回状態を記録
+        this.notificationCooldowns = new Map(); // パビリオン毎の最後の通知時刻を記録
         
         if (this.debug) {
             console.log('デバッグモードで実行中');
             console.log('監視対象パビリオン:', this.config.monitoring.pavilions);
+            console.log('通知制限機能:', this.config.notificationCooldown.enabled ? '有効' : '無効');
+            if (this.config.notificationCooldown.enabled) {
+                console.log(`クールダウン時間: ${this.config.notificationCooldown.duration}分`);
+            }
         }
     }
 
@@ -173,6 +178,11 @@ class ExpoMonitor {
             api: {
                 dataUrl: process.env.API_DATA_URL || 'https://expo.ebii.net/api/data',
                 timeout: parseInt(process.env.API_TIMEOUT) || 10000
+            },
+            notificationCooldown: {
+                enabled: process.env.NOTIFICATION_COOLDOWN_ENABLED === 'true',
+                duration: parseInt(process.env.NOTIFICATION_COOLDOWN_DURATION) || 30,
+                perPavilion: process.env.NOTIFICATION_COOLDOWN_PER_PAVILION === 'true'
             },
             debug: process.env.DEBUG === 'true'
         };
@@ -321,9 +331,54 @@ class ExpoMonitor {
         return pavilionMap;
     }
 
+    isInCooldown(pavilionCode) {
+        if (!this.config.notificationCooldown.enabled) {
+            return false;
+        }
+
+        const cooldownKey = this.config.notificationCooldown.perPavilion ? pavilionCode : 'global';
+        const lastNotificationTime = this.notificationCooldowns.get(cooldownKey);
+        
+        if (!lastNotificationTime) {
+            return false;
+        }
+
+        const cooldownDurationMs = this.config.notificationCooldown.duration * 60 * 1000;
+        const now = Date.now();
+        const isInCooldown = (now - lastNotificationTime) < cooldownDurationMs;
+
+        if (this.debug && isInCooldown) {
+            const remainingMinutes = Math.ceil((cooldownDurationMs - (now - lastNotificationTime)) / (60 * 1000));
+            console.log(`${pavilionCode}: クールダウン中 (残り${remainingMinutes}分)`);
+        }
+
+        return isInCooldown;
+    }
+
+    updateCooldownTime(pavilionCode) {
+        if (!this.config.notificationCooldown.enabled) {
+            return;
+        }
+
+        const cooldownKey = this.config.notificationCooldown.perPavilion ? pavilionCode : 'global';
+        this.notificationCooldowns.set(cooldownKey, Date.now());
+
+        if (this.debug) {
+            console.log(`${pavilionCode}: クールダウン開始 (${this.config.notificationCooldown.duration}分)`);
+        }
+    }
+
     async sendNotifications(pavilionMap) {
         for (const [pavilionCode, pavilionData] of pavilionMap) {
             try {
+                // クールダウンチェック
+                if (this.isInCooldown(pavilionCode)) {
+                    if (this.debug) {
+                        console.log(`${pavilionCode}: クールダウン中のため通知をスキップ`);
+                    }
+                    continue;
+                }
+
                 const displayName = this.getPavilionDisplayName(pavilionData.pavilion.c, pavilionData.pavilion.n);
                 const timeDetails = pavilionData.changedSlots.map(slot => 
                     `${this.formatTime(slot.time)}(${slot.statusText})`
@@ -335,6 +390,11 @@ class ExpoMonitor {
                     displayName,
                     timeDetails
                 );
+                
+                // 通知成功時のみクールダウンを更新
+                if (result.success > 0) {
+                    this.updateCooldownTime(pavilionCode);
+                }
                 
                 if (this.debug) {
                     console.log(`通知結果 (${pavilionCode}): ${result.success}/${result.total}件成功`);

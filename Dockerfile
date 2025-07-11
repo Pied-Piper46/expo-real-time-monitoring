@@ -17,7 +17,7 @@ RUN npm ci --only=production && npm cache clean --force
 
 # アプリケーションのソースコードをコピー
 COPY index.js ./
-COPY xApiTest.js ./
+COPY notifier.js ./
 
 # アプリケーションを実行
 CMD ["node", "index.js"]

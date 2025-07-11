@@ -2,8 +2,11 @@
 
 # マルチプラットフォーム対応でイメージをビルド・プッシュするスクリプト
 
+# シングルプラットフォーム
+# docker buildx build --platform linux/amd64 --tag yujik/expo-real-time-monitoring:1.4 --push .  
+
 IMAGE_NAME="yujik/expo-real-time-monitoring"
-VERSION="1.3"
+VERSION="1.4"
 PLATFORMS="linux/amd64,linux/arm64"
 
 echo "=== Docker buildx マルチプラットフォームビルド ==="
@@ -12,9 +15,9 @@ echo "プラットフォーム: ${PLATFORMS}"
 echo ""
 
 # buildx builderがない場合は作成
-docker buildx inspect multibuilder >/dev/null 2>&1 || {
-    echo "multiplatform-builder を作成中..."
-    docker buildx create --name multibuilder --use
+docker buildx inspect multi-platform-builder >/dev/null 2>&1 || {
+    echo "multi-platform-builder を作成中..."
+    docker buildx create --name multi-platform-builder --use
 }
 
 # buildxを使用してマルチプラットフォームビルド
