@@ -2,6 +2,12 @@
 const { TwitterApi } = require('twitter-api-v2');
 require('dotenv').config(); // .envファイルを読み込み
 
+function sleep(waitMsec) {
+  let startMsec = new Date();
+
+  while (new Date() - startMsec < waitMsec);
+}
+
 // 環境変数からX API設定を読み込み
 function loadXConfig() {
     const requiredVars = [];
@@ -39,18 +45,15 @@ const client = new TwitterApi({
   accessSecret: xConfig.accessSecret,
 });
 
-// 投稿したいメッセージ
-const tweetText = 'あと、サービス以降先として、このXのアカウントで住友館の空きを通知しようか迷ってるます、、一応自分にもフォロワーが増えるっていうメリットあるし。。てかXのAPI調べてるけどややこしすぎる。また制限にかかるのだけはやめたい。反省しております😑';
-
-// 投稿を実行する非同期関数を定義します
-const postTweet = async () => {
+// 投稿を実行する関数を定義します
+const postTweet = (tweetText) => {
   try {
     console.log('=== X API 投稿開始 ===');
     console.log('投稿テキスト:', tweetText);
     console.log('投稿テキスト長:', tweetText.length);
     
     // client.v2.tweet() を使って投稿します
-    const response = await client.v2.tweet(tweetText);
+    const response = client.v2.tweet(tweetText);
     
     console.log('\n=== 投稿成功！🎉 ===');
     
@@ -81,7 +84,7 @@ const postTweet = async () => {
     
     // レート制限情報を取得・表示
     try {
-      const rateLimitStatus = await client.v1.getRateLimitStatus();
+      const rateLimitStatus = client.v1.getRateLimitStatus();
       console.log('\n--- レート制限情報 ---');
       console.log('ツイート投稿 残り回数:', rateLimitStatus.resources.statuses.update.remaining);
       console.log('リセット時刻:', new Date(rateLimitStatus.resources.statuses.update.reset * 1000).toLocaleString('ja-JP'));
@@ -150,4 +153,10 @@ const postTweet = async () => {
 };
 
 // 関数を実行します
-postTweet();
+const tweetText1 = 'エラー検証';
+postTweet(tweetText1);
+
+sleep(10000);
+
+const tweetText2 = 'これがツイートされると謎は深まります。';
+postTweet(tweetText2);
