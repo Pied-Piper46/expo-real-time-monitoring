@@ -4,6 +4,8 @@
 
 # シングルプラットフォーム
 # docker buildx build --platform linux/amd64 --tag yujik/expo-real-time-monitoring:1.4 --push .  
+# docker tag yujik/expo-real-time-monitoring:[tag] yuji/expo-real-time-monitoring:latest
+# docker push yujik/expo-real-time-monitoring:latest
 
 IMAGE_NAME="yujik/expo-real-time-monitoring"
 VERSION="1.4"
