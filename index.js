@@ -427,9 +427,6 @@ class ExpoMonitor {
                 const totalChanges = Array.from(pavilionMap.values()).reduce((sum, data) => sum + data.changedSlots.length, 0);
                 console.log(`${timeStr}: ${pavilionMap.size}パビリオンで${totalChanges}件の状態変化を検出`);
                 await this.sendNotifications(pavilionMap);
-            } else if (this.debug) {
-                const timeStr = new Date().toLocaleString('ja-JP', {timeZone: 'Asia/Tokyo'});
-                console.log(`${timeStr}: 状態変化なし`);
             }
 
         } catch (error) {
@@ -493,17 +490,6 @@ class ExpoMonitor {
         }, {
             timezone: businessHours.timezone
         });
-
-        // cron動作確認用（毎分実行）
-        if (this.debug) {
-            cron.schedule('* * * * *', () => {
-                const now = new Date();
-                const jstTime = now.toLocaleString('ja-JP', {timeZone: businessHours.timezone});
-                console.log(`cron動作確認: ${jstTime} (監視中: ${this.isRunning})`);
-            }, {
-                timezone: businessHours.timezone
-            });
-        }
 
         // 起動時の営業時間チェック
         const now = new Date();

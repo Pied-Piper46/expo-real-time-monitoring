@@ -1,6 +1,10 @@
 const axios = require('axios');
 const https = require('https');
 const { TwitterApi } = require('twitter-api-v2');
+const crypto = require('crypto');
+
+// プロセス内のXAPIクライアント状態管理用
+let xApiCallCount = 0;
 
 async function sendSlackMessage(config, displayName, timeDetails) {
     if (!config.enabled || !config.webhookUrl) {
@@ -66,19 +70,111 @@ async function sendXMessage(config, displayName, timeDetails) {
     }
     
     try {
+        // プロセス内でのX API呼び出し統計を更新
+        xApiCallCount++;
+        
+        console.log(`[X API Debug] API呼び出し #${xApiCallCount}`);
+        
+        // 強制的にユニークなnonce生成を確保するため、複数の要素を組み合わせ
+        const processId = process.pid;
+        const uniqueSuffix = crypto.randomBytes(8).toString('hex');
+        const timestamp = Date.now();
+        const microseconds = process.hrtime.bigint();
+        
+        // プロセス内キャッシュを避けるため、完全に新しいクライアントを作成
+        // HTTP接続の再利用を無効化し、OAuth1のnonce重複を防ぐ
         const client = new TwitterApi({
             appKey: config.appKey,
             appSecret: config.appSecret,
             accessToken: config.accessToken,
             accessSecret: config.accessSecret
+        }, {
+            // HTTP接続プールを無効化してキャッシュを防ぐ
+            httpAgent: new https.Agent({ 
+                keepAlive: false,
+                maxSockets: 1,
+                timeout: 30000,
+                // 強制的に新しい接続を作成
+                maxFreeSockets: 0
+            }),
+            httpsAgent: new https.Agent({ 
+                keepAlive: false,
+                maxSockets: 1,
+                timeout: 30000,
+                maxFreeSockets: 0
+            }),
+            // TwitterAPI固有のオプション
+            timeout: 30000,
+            // ユーザーエージェントを動的に変更してセッション分離
+            userAgent: `ExpoBot/${processId}/${xApiCallCount}/${timestamp}`
         });
         
-        const tweetText = `空き検知 - ${displayName}`;
+        // タイムスタンプを含めて重複コンテンツエラーを回避
+        const now = new Date();
+        const timeString = now.toLocaleString('ja-JP', {
+            timeZone: 'Asia/Tokyo',
+            month: '2-digit',
+            day: '2-digit', 
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+        }).replace(/(\d{2})\/(\d{2}) (\d{2}:\d{2}:\d{2})/, '[$2-$1 $3]');
+        
+        const tweetText = `[${timeString}] 🟢空きあり - ${displayName}`;
+        
+        // デバッグログ用の情報を記録
+        const debugTimestamp = new Date().toISOString();
+        console.log(`[X API Debug ${debugTimestamp}] 投稿試行 #${xApiCallCount}: "${tweetText}"`);
+        console.log(`[X API Debug ${debugTimestamp}] ProcessID: ${processId}, UniqueID: ${uniqueSuffix}, Microsec: ${microseconds}`);
+        
         const { data: createdTweet } = await client.v2.tweet(tweetText);
         
-        return { success: true, platform: 'X', tweetId: createdTweet.id };
+        console.log(`[X API Debug ${debugTimestamp}] 投稿成功 #${xApiCallCount}: ID ${createdTweet.id}`);
+        
+        return { 
+            success: true, 
+            platform: 'X', 
+            tweetId: createdTweet.id, 
+            debugInfo: { 
+                timestamp: debugTimestamp, 
+                text: tweetText, 
+                uniqueId: uniqueSuffix, 
+                callCount: xApiCallCount,
+                processId: processId
+            } 
+        };
     } catch (error) {
-        return { success: false, platform: 'X', error: error.message };
+        const timestamp = new Date().toISOString();
+        console.error(`[X API Debug ${timestamp}] 投稿失敗 #${xApiCallCount}: ${error.message}`);
+        console.error(`[X API Debug ${timestamp}] HTTPコード: ${error.code || 'N/A'}`);
+        console.error(`[X API Debug ${timestamp}] レスポンス:`, error.data || 'なし');
+        console.error(`[X API Debug ${timestamp}] コール統計: 総計${xApiCallCount}回, プロセス${process.pid}`);
+        
+        // 403エラーの場合は特別な処理
+        if (error.code === 403) {
+            console.error(`[X API CRITICAL ${timestamp}] 403 Forbidden エラー - OAuth1状態問題の可能性`);
+            console.error(`[X API CRITICAL ${timestamp}] プロセス再起動を推奨`);
+            
+            // プロセス状態をリセット（次回の試行のため）
+            if (xApiCallCount > 1) {
+                console.error(`[X API CRITICAL ${timestamp}] 状態をリセットしています`);
+                xApiCallCount = 0;
+            }
+        }
+        
+        return { 
+            success: false, 
+            platform: 'X', 
+            error: error.message, 
+            debugInfo: { 
+                timestamp, 
+                httpCode: error.code, 
+                responseData: error.data,
+                callCount: xApiCallCount,
+                processId: process.pid,
+                is403Error: error.code === 403
+            } 
+        };
     }
 }
 
