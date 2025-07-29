@@ -118,9 +118,9 @@ async function sendXMessage(config, displayName, timeDetails) {
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit'
-        }).replace(/(\d{2})\/(\d{2}) (\d{2}:\d{2}:\d{2})/, '[$2-$1 $3]');
+        }).replace(/(\d{2})\/(\d{2}) (\d{2}:\d{2}:\d{2})/, '[$1-$2 $3]');
         
-        const tweetText = `[${timeString}] 🟢空きあり - ${displayName}`;
+        const tweetText = `${timeString} ${displayName} - 🟢空きあり`;
         
         // デバッグログ用の情報を記録
         const debugTimestamp = new Date().toISOString();
